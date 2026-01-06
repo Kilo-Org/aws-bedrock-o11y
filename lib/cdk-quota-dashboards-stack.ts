@@ -321,15 +321,38 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
         period: cdk.Duration.minutes(1),
       });
 
-      // Calculate total quota consumption with burndown rate
-      const quotaTokenUsage = new cloudwatch.MathExpression({
+      // Custom metric for max_tokens parameter
+      const maxTokensMetric = new cloudwatch.Metric({
+        namespace: 'Bedrock/Quotas',
+        metricName: 'MaxTokens',
+        dimensionsMap: {
+          ModelId: fullModelId,
+        },
+        statistic: 'Sum',
+        period: cdk.Duration.minutes(1),
+      });
+
+      // Calculate actual consumption (what you actually used after request completes)
+      const actualConsumption = new cloudwatch.MathExpression({
         expression: `inputTokens + cacheWriteTokens + (outputTokens * ${burndownRate})`,
         usingMetrics: {
           inputTokens: inputTokens,
           cacheWriteTokens: cacheWriteTokens,
           outputTokens: outputTokens,
         },
-        label: 'Quota Consumption (Tokens)',
+        label: 'Actual Consumption',
+        period: cdk.Duration.minutes(1),
+      });
+
+      // Calculate initial reservation (what Bedrock reserves when request arrives)
+      const initialReservation = new cloudwatch.MathExpression({
+        expression: `inputTokens + cacheWriteTokens + maxTokens`,
+        usingMetrics: {
+          inputTokens: inputTokens,
+          cacheWriteTokens: cacheWriteTokens,
+          maxTokens: maxTokensMetric,
+        },
+        label: 'Initial Reservation',
         period: cdk.Duration.minutes(1),
       });
 
@@ -367,10 +390,11 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
 
       // Add widgets to dashboard with quota metrics on left axis
       dashboard.addWidgets(
+        // All three widgets on the same row
         new cloudwatch.GraphWidget({
-          title: `${fullModelId} - Token Quota Consumption`,
-          left: [quotaTokenUsage, tokenQuotaLine],
-          width: 12,
+          title: `${fullModelId} - Initial Reservation`,
+          left: [initialReservation, tokenQuotaLine],
+          width: 8,
           height: 6,
           leftYAxis: {
             label: 'Quota Units (Tokens/min)',
@@ -379,9 +403,20 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
           period: cdk.Duration.minutes(1),
         }),
         new cloudwatch.GraphWidget({
+          title: `${fullModelId} - Actual Consumption`,
+          left: [actualConsumption, tokenQuotaLine],
+          width: 8,
+          height: 6,
+          leftYAxis: {
+            label: 'Quota Units (Tokens/min) - Does not include ongoing requests',
+            min: 0,
+          },
+          period: cdk.Duration.minutes(1),
+        }),
+        new cloudwatch.GraphWidget({
           title: `${fullModelId} - Request Quota Consumption`,
           left: [invocations, requestQuotaLine],
-          width: 12,
+          width: 8,
           height: 6,
           leftYAxis: {
             label: 'Quota Units (Requests/min)',
