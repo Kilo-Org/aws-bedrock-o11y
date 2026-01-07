@@ -29,18 +29,24 @@ For detailed information about the complete token quota calculation system, see 
 
 ### Why Throttling Occurs
 
-The most common cause of unexpected throttling is the **quota reservation at request start**. Even if your actual token usage is low, Bedrock reserves quota based on your `max_tokens` parameter, which can be dramatically larger than actual output.
+The most common cause of unexpected throttling is the **quota reservation at request start**. Even if actual token usage is low, Bedrock reserves quota based on the `max_tokens` parameter, which can be dramatically larger than actual output.
 
-**Example with model-specific burndown rate:**
-- Request: 1,000 input tokens, `max_tokens: 4,000`
-- **Reserved at start**: 5,000 tokens (1,000 + 4,000)
+If `max_tokens` is not explicitly set, it defaults to the model's maximum output capacity. For Claude Sonnet, this is 64,000 tokens. This default behavior is the source of most unexpected throttling issues.
+
+**Example with Claude Sonnet (64K max_tokens default):**
+- Request: 1,000 input tokens, `max_tokens: 64,000` (default if not set)
+- **Reserved at start**: 65,000 tokens (1,000 + 64,000)
 - **Actual output**: 100 tokens
 - **Final consumption**: Calculated using model's burndown rate
-- **Difference**: 3,500 tokens were temporarily held but not consumed
+- **Difference**: 63,900 tokens were temporarily held but not consumed
+
+This massive gap between reserved and actual consumption explains why applications experience throttling even when actual token usage appears low. Without tracking the `max_tokens` parameter, it is difficult to understand the quota reservation.
 
 ### Custom Metrics for Request Start Tracking
 
-To accurately track quota consumption at request start (which causes throttling), you need to publish one custom metric: the `max_tokens` parameter value. Here are implementation examples:
+To accurately track quota consumption at request start (which causes throttling), publish one custom metric: the `max_tokens` parameter value.
+
+Here are implementation examples:
 
 #### Boto3 Client Wrapper with max_tokens Tracking
 
@@ -207,7 +213,7 @@ if __name__ == "__main__":
         max_tokens=4096,
     )
     
-    # Create your Strands agent with the Bedrock model
+    # Create the Strands agent with the Bedrock model
     agent = Agent(model=model)
     
     # Register the hook callback for AfterInvocationEvent
@@ -220,12 +226,12 @@ if __name__ == "__main__":
 
 ### Enhanced Dashboard Visualization
 
-Once you implement max_tokens metric publishing, this dashboard displays:
+Once max_tokens metric publishing is implemented, this dashboard displays:
 
-- **Initial Reservation**: Quota reserved when your request arrives (includes `max_tokens`)
+- **Initial Reservation**: Quota reserved when requests arrive (includes `max_tokens`)
 - **Actual Consumption**: Tokens consumed after requests complete
 
-This dual view shows you what causes throttling (initial reservation) and your final consumption.
+This dual view shows what causes throttling (initial reservation) and final consumption.
 
 ### Understanding Quota Usage Estimates
 
@@ -233,15 +239,15 @@ This dual view shows you what causes throttling (initial reservation) and your f
 
 Amazon Bedrock dynamically adjusts quota consumption throughout output generation. As tokens are produced, the platform progressively releases the reserved quota. The two metrics serve different purposes:
 
-- **Initial Reservation** shows what Bedrock reserves when your request arrives. This determines whether you get throttled at request start.
-- **Actual Consumption** shows what you actually consumed after the request completes.
+- **Initial Reservation** shows what Bedrock reserves when requests arrive. This determines whether throttling occurs at request start.
+- **Actual Consumption** shows what was actually consumed after requests complete.
 
 For models with 1x burndown rates, Actual Consumption will always be less than or equal to Initial Reservation. For models with 5x burndown rates, Actual Consumption can exceed Initial Reservation if the model generates substantial output.
 
 **Practical implications:**
-- If Initial Reservation exceeds the limit but you are not seeing throttling, this is expected as the quota reservation is being released as output generates.
-- If you are experiencing throttling, consider reducing your `max_tokens` parameter to lower the Initial Reservation.
-- The gap between the two lines shows how much "buffer" your `max_tokens` setting creates.
+- If Initial Reservation exceeds the limit but throttling is not occurring, this is expected as the quota reservation is being released as output generates.
+- If throttling is occurring, consider reducing the `max_tokens` parameter to lower the Initial Reservation.
+- The gap between the two lines shows how much "buffer" the `max_tokens` setting creates.
 
 ## Features
 
@@ -273,7 +279,7 @@ AWS_DEFAULT_REGION=your-region npx cdk deploy
 
 **For different regions:** Update `lib/bedrock-registries.ts` to import the correct region file before deploying.
 
-**⚠️ Important:** The registry import must match your deployment region, or you'll get incorrect quota codes. Note that us-east-1 has the most complete model coverage in this repository. You can add more models by following [these instructions](lib/bedrock-registries/README.md) 
+**⚠️ Important:** The registry import must match the deployment region, or incorrect quota codes will be used. Note that us-east-1 has the most complete model coverage in this repository. Additional models can be added by following [these instructions](lib/bedrock-registries/README.md) 
 ## Architecture
 
 ### System Overview
@@ -296,7 +302,7 @@ graph LR
     BEDROCK[Amazon Bedrock Models<br/>Usage Metrics<br/>InputTokenCount, OutputTokenCount<br/>CacheWriteInputTokenCount, Invocations]
     
     %% Custom Metrics Source
-    APP[Your Application Publishes Custom Metrics]
+    APP[Application Publishes Custom Metrics]
     
     %% CloudWatch Metrics
     CW_CUSTOM[Amazon CloudWatch<br/>Custom Metrics<br/>MaxTokens, TokenQuota, RequestQuota]
@@ -333,7 +339,7 @@ graph LR
 
 - **QuotaFetcher AWS Lambda**: ARM64-optimized function that fetches Service Quota limit values and publishes them as Amazon CloudWatch custom metrics
 - **Amazon EventBridge Rule**: Refreshes quota limit values every 2.9 hours
-- **Custom Metrics Integration**: Your application publishes `max_tokens` parameter values to CloudWatch on each Bedrock API call
+- **Custom Metrics Integration**: Applications publish `max_tokens` parameter values to CloudWatch on each Bedrock API call
 - **Amazon CloudWatch Dashboard**: Displays dual quota tracking:
   - **Initial Reservation**: `InputTokens + CacheWriteTokens + MaxTokens`
   - **Actual Consumption**: `InputTokens + CacheWriteTokens + (OutputTokens × BurndownRate)`
@@ -398,13 +404,13 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 
 **Quota fetch fails:**
 - Check AWS IAM permissions for Service Quotas
-- Verify quota codes for your region match the registry import
+- Verify quota codes for the target region match the registry import
 - Check QuotaFetcher AWS Lambda logs
 - Ensure deployment region matches registry configuration
 
 **No metrics showing:**
 - Wait 1-2 minutes for metrics to populate
-- Ensure you've invoked the models
+- Ensure the models have been invoked
 - Verify model IDs match exactly (case-sensitive)
 - Check model configuration in region-specific registry file
 
@@ -412,10 +418,10 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 - Wait for next refresh (every 2.9 hours)
 - Check `Bedrock/Quotas` namespace in Amazon CloudWatch
 - Manually invoke QuotaFetcher AWS Lambda
-- Verify quota codes exist in your deployment region
+- Verify quota codes exist in the deployment region
 
 **TypeScript compilation errors:**
-- Ensure you're using supported endpoint types for each model
+- Ensure supported endpoint types are being used for each model
 - Check that quota codes follow the `L-xxxxxxxx` format
 - Verify all required model properties are present
 - Run `npx tsc --noEmit` to check for type errors
@@ -423,7 +429,7 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 **Region mismatch errors:**
 - Ensure `lib/bedrock-registries.ts` imports the correct region file
 - Verify deployment region matches the imported registry
-- Check that quota codes exist in your target region
+- Check that quota codes exist in the target region
 
 ## Outputs
 
@@ -457,8 +463,8 @@ Custom metrics are stored for 15 months. The MaxTokens metric, published with ea
 **Important notes:**
 - Custom metrics persist 15 months after deletion
 - The MaxTokens metric is published with each Bedrock API call, potentially generating high-frequency data points
-- When you run `npx cdk destroy`, all resources stop immediately except Amazon CloudWatch custom metrics, which persist for 15 months and incur minimal charges until expiration
-- To eliminate all costs, you can manually delete metrics from the "Bedrock/Quotas" and "Bedrock/CustomMetrics" namespaces in the Amazon CloudWatch console
+- When `npx cdk destroy` is run, all resources stop immediately except Amazon CloudWatch custom metrics, which persist for 15 months and incur minimal charges until expiration
+- To eliminate all costs, manually delete metrics from the "Bedrock/Quotas" and "Bedrock/CustomMetrics" namespaces in the Amazon CloudWatch console
 
 ## Cleanup
 
