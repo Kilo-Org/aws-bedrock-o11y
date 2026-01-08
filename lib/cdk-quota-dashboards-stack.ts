@@ -31,6 +31,20 @@ interface DashboardConfig {
    * @example 'global-cross-region'
    */
   endpointType: EndpointType;
+  
+  /**
+   * Optional list of application inference profile IDs that share quota with this model.
+   * 
+   * Application inference profiles created from a system inference profile share the same
+   * quota. When specified, the dashboard will aggregate metrics across all profiles
+   * (system + application) to show total usage against the shared quota.
+   * 
+   * Use the discovery script to find your application profile IDs:
+   *   npx ts-node scripts/discover-inference-profiles.ts
+   * 
+   * @example ['grjihoh0los8', 'cypje2y15yrd', 'wqwinsplsugw']
+   */
+  applicationProfileIds?: string[];
 }
 
 /**
@@ -83,6 +97,12 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
     // NOTE: Each model/endpoint combination is validated at runtime.
     // If you add a new configuration, ensure the model supports the specified endpoint type.
     // Use getSupportedEndpointTypes(modelConfig) to check valid options for a model.
+    //
+    // APPLICATION INFERENCE PROFILES:
+    // If you have application inference profiles that share quota with a system profile,
+    // add their IDs to the applicationProfileIds array. This aggregates metrics across
+    // all profiles to show total usage against the shared quota.
+    // Run: npx ts-node scripts/discover-inference-profiles.ts to find your profile IDs.
     const allDashboardConfigs: DashboardConfig[] = [
 
       // Amazon Nova 2 Models
@@ -90,7 +110,13 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
 
       // Anthropic Claude 4 Models (cross-region only)
       { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_HAIKU_4_5, endpointType: 'cross-region' },
-      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, endpointType: 'cross-region' },
+      { 
+        modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, 
+        endpointType: 'cross-region',
+        // Example: Application inference profiles sharing quota with Claude Sonnet 4.5
+        // These were discovered using: python scripts/discover-inference-profiles.py
+        applicationProfileIds: ['fxbird0px9s7', 'grjihoh0los8', 'cypje2y15yrd', 'wqwinsplsugw'],
+      },
       { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_OPUS_4_5, endpointType: 'cross-region' },
 
     ];
@@ -250,6 +276,12 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
 
       // Get burndown rate from model config
       const burndownRate = config.modelConfig.outputTokenBurndownRate;
+      
+      // Check if we have application profiles to aggregate
+      const hasApplicationProfiles = config.applicationProfileIds && config.applicationProfileIds.length > 0;
+      const allProfileIds = hasApplicationProfiles 
+        ? [fullModelId, ...config.applicationProfileIds!]
+        : [fullModelId];
 
       // Add banner when entering a new model family
       if (modelFamily !== currentFamily) {
@@ -288,84 +320,143 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
         color: cloudwatch.Color.RED,
       });
 
-
-
-      // Create metrics
-      const inputTokens = new cloudwatch.Metric({
-        namespace: 'AWS/Bedrock',
-        metricName: 'InputTokenCount',
-        dimensionsMap: {
-          ModelId: fullModelId,
-        },
-        statistic: 'Sum',
-        period: cdk.Duration.minutes(1),
+      // Helper function to create metrics for a specific profile ID
+      const createProfileMetrics = (profileId: string) => ({
+        inputTokens: new cloudwatch.Metric({
+          namespace: 'AWS/Bedrock',
+          metricName: 'InputTokenCount',
+          dimensionsMap: { ModelId: profileId },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(1),
+        }),
+        cacheWriteTokens: new cloudwatch.Metric({
+          namespace: 'AWS/Bedrock',
+          metricName: 'CacheWriteInputTokenCount',
+          dimensionsMap: { ModelId: profileId },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(1),
+        }),
+        outputTokens: new cloudwatch.Metric({
+          namespace: 'AWS/Bedrock',
+          metricName: 'OutputTokenCount',
+          dimensionsMap: { ModelId: profileId },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(1),
+        }),
+        maxTokens: new cloudwatch.Metric({
+          namespace: 'Bedrock/Quotas',
+          metricName: 'MaxTokens',
+          dimensionsMap: { ModelId: profileId },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(1),
+        }),
+        invocations: new cloudwatch.Metric({
+          namespace: 'AWS/Bedrock',
+          metricName: 'Invocations',
+          dimensionsMap: { ModelId: profileId },
+          statistic: 'Sum',
+          period: cdk.Duration.minutes(1),
+        }),
       });
 
-      const cacheWriteTokens = new cloudwatch.Metric({
-        namespace: 'AWS/Bedrock',
-        metricName: 'CacheWriteInputTokenCount',
-        dimensionsMap: {
-          ModelId: fullModelId,
-        },
-        statistic: 'Sum',
-        period: cdk.Duration.minutes(1),
-      });
+      // Create metrics for all profiles
+      const allProfileMetrics = allProfileIds.map((id, index) => ({
+        id,
+        metrics: createProfileMetrics(id),
+        suffix: index === 0 ? '' : `_${index}`, // Suffix for metric variable names
+      }));
 
-      const outputTokens = new cloudwatch.Metric({
-        namespace: 'AWS/Bedrock',
-        metricName: 'OutputTokenCount',
-        dimensionsMap: {
-          ModelId: fullModelId,
-        },
-        statistic: 'Sum',
-        period: cdk.Duration.minutes(1),
-      });
+      // Build aggregated expressions
+      let actualConsumption: cloudwatch.IMetric;
+      let initialReservation: cloudwatch.IMetric;
+      let totalInvocations: cloudwatch.IMetric;
 
-      // Custom metric for max_tokens parameter
-      const maxTokensMetric = new cloudwatch.Metric({
-        namespace: 'Bedrock/Quotas',
-        metricName: 'MaxTokens',
-        dimensionsMap: {
-          ModelId: fullModelId,
-        },
-        statistic: 'Sum',
-        period: cdk.Duration.minutes(1),
-      });
+      if (hasApplicationProfiles) {
+        // Aggregate metrics across all profiles
+        const usingMetrics: { [key: string]: cloudwatch.IMetric } = {};
+        const inputParts: string[] = [];
+        const cacheParts: string[] = [];
+        const outputParts: string[] = [];
+        const maxTokensParts: string[] = [];
+        const invocationParts: string[] = [];
 
-      // Calculate actual consumption (what you actually used after request completes)
-      const actualConsumption = new cloudwatch.MathExpression({
-        expression: `inputTokens + cacheWriteTokens + (outputTokens * ${burndownRate})`,
-        usingMetrics: {
-          inputTokens: inputTokens,
-          cacheWriteTokens: cacheWriteTokens,
-          outputTokens: outputTokens,
-        },
-        label: 'Actual Consumption',
-        period: cdk.Duration.minutes(1),
-      });
+        allProfileMetrics.forEach(({ metrics, suffix }) => {
+          const inputKey = `inputTokens${suffix}`;
+          const cacheKey = `cacheWriteTokens${suffix}`;
+          const outputKey = `outputTokens${suffix}`;
+          const maxKey = `maxTokens${suffix}`;
+          const invKey = `invocations${suffix}`;
 
-      // Calculate initial reservation (what Bedrock reserves when request arrives)
-      const initialReservation = new cloudwatch.MathExpression({
-        expression: `inputTokens + cacheWriteTokens + maxTokens`,
-        usingMetrics: {
-          inputTokens: inputTokens,
-          cacheWriteTokens: cacheWriteTokens,
-          maxTokens: maxTokensMetric,
-        },
-        label: 'Initial Reservation',
-        period: cdk.Duration.minutes(1),
-      });
+          usingMetrics[inputKey] = metrics.inputTokens;
+          usingMetrics[cacheKey] = metrics.cacheWriteTokens;
+          usingMetrics[outputKey] = metrics.outputTokens;
+          usingMetrics[maxKey] = metrics.maxTokens;
+          usingMetrics[invKey] = metrics.invocations;
 
-      // Create request count metric
-      const invocations = new cloudwatch.Metric({
-        namespace: 'AWS/Bedrock',
-        metricName: 'Invocations',
-        dimensionsMap: {
-          ModelId: fullModelId,
-        },
-        statistic: 'Sum',
-        period: cdk.Duration.minutes(1),
-      });
+          inputParts.push(inputKey);
+          cacheParts.push(cacheKey);
+          outputParts.push(outputKey);
+          maxTokensParts.push(maxKey);
+          invocationParts.push(invKey);
+        });
+
+        // Build sum expressions
+        const inputSum = inputParts.join(' + ');
+        const cacheSum = cacheParts.join(' + ');
+        const outputSum = outputParts.join(' + ');
+        const maxTokensSum = maxTokensParts.join(' + ');
+        const invocationSum = invocationParts.join(' + ');
+
+        actualConsumption = new cloudwatch.MathExpression({
+          expression: `(${inputSum}) + (${cacheSum}) + ((${outputSum}) * ${burndownRate})`,
+          usingMetrics,
+          label: `Actual Consumption (${allProfileIds.length} profiles)`,
+          period: cdk.Duration.minutes(1),
+        });
+
+        initialReservation = new cloudwatch.MathExpression({
+          expression: `(${inputSum}) + (${cacheSum}) + (${maxTokensSum})`,
+          usingMetrics,
+          label: `Initial Reservation (${allProfileIds.length} profiles)`,
+          period: cdk.Duration.minutes(1),
+        });
+
+        totalInvocations = new cloudwatch.MathExpression({
+          expression: invocationSum,
+          usingMetrics,
+          label: `Total Invocations (${allProfileIds.length} profiles)`,
+          period: cdk.Duration.minutes(1),
+        });
+
+        console.log(`[PROFILE_AGGREGATION] ${fullModelId}: Aggregating ${allProfileIds.length} profiles (1 system + ${config.applicationProfileIds!.length} application)`);
+      } else {
+        // Single profile - use simple metrics
+        const { metrics } = allProfileMetrics[0];
+
+        actualConsumption = new cloudwatch.MathExpression({
+          expression: `inputTokens + cacheWriteTokens + (outputTokens * ${burndownRate})`,
+          usingMetrics: {
+            inputTokens: metrics.inputTokens,
+            cacheWriteTokens: metrics.cacheWriteTokens,
+            outputTokens: metrics.outputTokens,
+          },
+          label: 'Actual Consumption',
+          period: cdk.Duration.minutes(1),
+        });
+
+        initialReservation = new cloudwatch.MathExpression({
+          expression: 'inputTokens + cacheWriteTokens + maxTokens',
+          usingMetrics: {
+            inputTokens: metrics.inputTokens,
+            cacheWriteTokens: metrics.cacheWriteTokens,
+            maxTokens: metrics.maxTokens,
+          },
+          label: 'Initial Reservation',
+          period: cdk.Duration.minutes(1),
+        });
+
+        totalInvocations = metrics.invocations;
+      }
 
       // Wrap quota metrics with FILL to create continuous horizontal lines
       const tokenQuotaLine = new cloudwatch.MathExpression({
@@ -388,11 +479,16 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
         period: cdk.Duration.minutes(1),
       });
 
+      // Build widget title with profile count if aggregating
+      const titleSuffix = hasApplicationProfiles 
+        ? ` (${allProfileIds.length} profiles aggregated)`
+        : '';
+
       // Add widgets to dashboard with quota metrics on left axis
       dashboard.addWidgets(
         // All three widgets on the same row
         new cloudwatch.GraphWidget({
-          title: `${fullModelId} - Initial Reservation`,
+          title: `${fullModelId} - Initial Reservation${titleSuffix}`,
           left: [initialReservation, tokenQuotaLine],
           width: 8,
           height: 6,
@@ -403,7 +499,7 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
           period: cdk.Duration.minutes(1),
         }),
         new cloudwatch.GraphWidget({
-          title: `${fullModelId} - Actual Consumption`,
+          title: `${fullModelId} - Actual Consumption${titleSuffix}`,
           left: [actualConsumption, tokenQuotaLine],
           width: 8,
           height: 6,
@@ -414,8 +510,8 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
           period: cdk.Duration.minutes(1),
         }),
         new cloudwatch.GraphWidget({
-          title: `${fullModelId} - Request Quota Consumption`,
-          left: [invocations, requestQuotaLine],
+          title: `${fullModelId} - Request Quota Consumption${titleSuffix}`,
+          left: [totalInvocations, requestQuotaLine],
           width: 8,
           height: 6,
           leftYAxis: {
