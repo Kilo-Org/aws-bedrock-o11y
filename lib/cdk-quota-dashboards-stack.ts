@@ -110,13 +110,14 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
 
       // Anthropic Claude 4 Models (cross-region only)
       { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_HAIKU_4_5, endpointType: 'cross-region' },
-      { 
-        modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, 
-        endpointType: 'cross-region',
-        // Example: Application inference profiles sharing quota with Claude Sonnet 4.5
-        // These were discovered using: python scripts/discover-inference-profiles.py
-        applicationProfileIds: ['fxbird0px9s7', 'grjihoh0los8', 'cypje2y15yrd', 'wqwinsplsugw'],
-      },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, endpointType: 'cross-region' },
+      // Example: To aggregate application inference profiles sharing quota with a model:
+      // { 
+      //   modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, 
+      //   endpointType: 'cross-region',
+      //   // Discovered using: npx ts-node scripts/discover-inference-profiles.ts
+      //   applicationProfileIds: ['your-profile-id-1', 'your-profile-id-2'],
+      // },
       { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_OPUS_4_5, endpointType: 'cross-region' },
 
     ];

@@ -394,15 +394,23 @@ The script lists all application profiles grouped by their source system profile
 
 ```
 us.anthropic.claude-sonnet-4-5-20250929-v1:0
-  Application profiles (4):
-    - fxbird0px9s7: Canva-Claude-Sonnet-4-5
-    - grjihoh0los8: bryn-sonnet-45-profile-1
-    - cypje2y15yrd: bryn-sonnet-45-profile-2
-    - wqwinsplsugw: bryn-sonnet-45-profile-3
+  Application profiles (3):
+    - abc123def456: my-app-production
+    - ghi789jkl012: my-app-staging
+    - mno345pqr678: team-shared-profile
 
 // Copy this to your stack configuration:
-applicationProfileIds: ["fxbird0px9s7","grjihoh0los8","cypje2y15yrd","wqwinsplsugw"],
+applicationProfileIds: ["abc123def456","ghi789jkl012","mno345pqr678"],
 ```
+
+### Important Notes
+
+**Only aggregate profiles for the same model and endpoint type.** Do not mix inference profiles from different models together. All profiles in the `applicationProfileIds` array must:
+- Share quota with the same system inference profile
+- Use the same model (e.g., all Claude Sonnet 4.5)
+- Use the same endpoint type (regional, cross-region, or global)
+
+**MaxTokens metric format for application profiles:** When publishing the `MaxTokens` custom metric for application inference profiles, use just the profile ID (e.g., `cypje2y15yrd`), not the full ARN (`arn:aws:bedrock:us-east-1:<account_id>:application-inference-profile/cypje2y15yrd`). This ensures the Initial Reservation graph correctly aggregates the max_tokens values across all profiles.
 
 ### When to Use
 
