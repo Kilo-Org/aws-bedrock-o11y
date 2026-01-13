@@ -256,6 +256,7 @@ For models with 1x burndown rates, Actual Consumption will always be less than o
 - **Region-Specific Architecture**: Easy deployment to different AWS regions with region-specific quota codes
 - **Dual Quota Monitoring**: Tracks both token quotas (TPM) and request quotas (RPM)
 - **Multi-Endpoint Support**: Regional, cross-region, and global-cross-region endpoints
+- **Application Inference Profile Aggregation**: Aggregate metrics across application profiles that share quota with a system profile
 - **Auto-Refresh**: Updates quota values every 2.9 hours via Amazon EventBridge
 - **Visual Dashboard**: 2-column layout with red quota limit lines
 
@@ -362,6 +363,60 @@ lib/bedrock-registries/
 - ✅ **Region Clarity**: Explicit region selection with one-line deployment changes
 - ✅ **Direct Access**: `BEDROCK_MODELS.AMAZON.NOVA_LITE_V1.regional.tokenQuotaCode`
 - ✅ **Endpoint Validation**: TypeScript prevents access to unsupported endpoints
+
+## Application Inference Profile Aggregation
+
+When you create [application inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-create.html) from a system inference profile, they share the same quota. To accurately monitor total usage against the shared quota, the dashboard can aggregate metrics across all profiles.
+
+### How It Works
+
+1. **Discover your application profiles** using the included script:
+   ```bash
+   npx ts-node scripts/discover-inference-profiles.ts [region]
+   ```
+
+2. **Add profile IDs to your dashboard configuration**:
+   ```typescript
+   const allDashboardConfigs: DashboardConfig[] = [
+     {
+       modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5,
+       endpointType: 'cross-region',
+       applicationProfileIds: ['profile1', 'profile2', 'profile3'],
+     },
+   ];
+   ```
+
+3. **Deploy** - the dashboard will show aggregated metrics with "(X profiles aggregated)" in widget titles
+
+### Discovery Script Output
+
+The script lists all application profiles grouped by their source system profile:
+
+```
+us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  Application profiles (3):
+    - abc123def456: my-app-production
+    - ghi789jkl012: my-app-staging
+    - mno345pqr678: team-shared-profile
+
+// Copy this to your stack configuration:
+applicationProfileIds: ["abc123def456","ghi789jkl012","mno345pqr678"],
+```
+
+### Important Notes
+
+**Only aggregate profiles for the same model and endpoint type.** Do not mix inference profiles from different models together. All profiles in the `applicationProfileIds` array must:
+- Share quota with the same system inference profile
+- Use the same model (e.g., all Claude Sonnet 4.5)
+- Use the same endpoint type (regional, cross-region, or global)
+
+**MaxTokens metric format for application profiles:** When publishing the `MaxTokens` custom metric for application inference profiles, use just the profile ID (e.g., `cypje2y15yrd`), not the full ARN (`arn:aws:bedrock:us-east-1:<account_id>:application-inference-profile/cypje2y15yrd`). This ensures the Initial Reservation graph correctly aggregates the max_tokens values across all profiles.
+
+### When to Use
+
+- You have multiple application inference profiles sharing quota with a system profile
+- You want to see total usage across all profiles against the shared quota limit
+- Different teams or applications use separate profiles but share the same underlying quota
 
 ## Adding New Models
 
