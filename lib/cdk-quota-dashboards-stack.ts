@@ -110,7 +110,9 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
 
       // Anthropic Claude 4 Models (cross-region only)
       { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_HAIKU_4_5, endpointType: 'cross-region' },
-      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, endpointType: 'cross-region' },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, endpointType: 'global-cross-region' },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_6, endpointType: 'global-cross-region' },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_6_1M, endpointType: 'global-cross-region' },
       // Example: To aggregate application inference profiles sharing quota with a model:
       // { 
       //   modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_SONNET_4_5, 
@@ -118,7 +120,9 @@ export class CdkQuotaDashboardsStack extends cdk.Stack {
       //   // Discovered using: npx ts-node scripts/discover-inference-profiles.ts
       //   applicationProfileIds: ['your-profile-id-1', 'your-profile-id-2'],
       // },
-      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_OPUS_4_5, endpointType: 'cross-region' },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_OPUS_4_5, endpointType: 'global-cross-region' },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_OPUS_4_6, endpointType: 'global-cross-region' },
+      { modelConfig: BEDROCK_MODELS.ANTHROPIC.CLAUDE_OPUS_4_6_1M, endpointType: 'global-cross-region' },
 
     ];
 

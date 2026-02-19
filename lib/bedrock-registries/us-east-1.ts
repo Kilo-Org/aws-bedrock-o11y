@@ -151,6 +151,22 @@ export const BEDROCK_MODELS = {
       crossRegion: { tokenQuotaCode: 'L-F4DDD3EB', requestQuotaCode: 'L-4A6BFAB1' },
       globalCrossRegion: { tokenQuotaCode: 'L-27C57EE8', requestQuotaCode: 'L-DB84CE56' }
     }),
+
+    CLAUDE_SONNET_4_6: createModelConfig({
+      modelId: 'anthropic.claude-sonnet-4-6',
+      outputTokenBurndownRate: 5,
+      supportedEndpoints: ['cross-region', 'global-cross-region'],
+      crossRegion: { tokenQuotaCode: 'L-15B8E632', requestQuotaCode: 'L-00FF3314' },
+      globalCrossRegion: { tokenQuotaCode: 'L-7BEE40FB', requestQuotaCode: 'L-F6E116D7' }
+    }),
+
+    CLAUDE_SONNET_4_6_1M: createModelConfig({
+      modelId: 'anthropic.claude-sonnet-4-6',
+      outputTokenBurndownRate: 5,
+      supportedEndpoints: ['cross-region', 'global-cross-region'],
+      crossRegion: { tokenQuotaCode: 'L-CE512C9A', requestQuotaCode: 'L-47DE5258' },
+      globalCrossRegion: { tokenQuotaCode: 'L-6955C77B', requestQuotaCode: 'L-B117CDDA' }
+    }),
     
     CLAUDE_OPUS_4: createModelConfig({
       modelId: 'anthropic.claude-opus-4-20250514-v1:0',
@@ -172,6 +188,22 @@ export const BEDROCK_MODELS = {
       supportedEndpoints: ['cross-region', 'global-cross-region'],
       crossRegion: { tokenQuotaCode: 'L-7007E9C9', requestQuotaCode: 'L-27989F42' },
       globalCrossRegion: { tokenQuotaCode: 'L-3ABF6ACC', requestQuotaCode: 'L-58424D95' }
+    }),
+
+    CLAUDE_OPUS_4_6: createModelConfig({
+      modelId: 'anthropic.claude-opus-4-6-v1',
+      outputTokenBurndownRate: 5,
+      supportedEndpoints: ['cross-region', 'global-cross-region'],
+      crossRegion: { tokenQuotaCode: 'L-0AD9BBE8', requestQuotaCode: 'L-11DFF789' },
+      globalCrossRegion: { tokenQuotaCode: 'L-3DCCFAA4', requestQuotaCode: 'L-3DD46812' }
+    }),
+
+    CLAUDE_OPUS_4_6_1M: createModelConfig({
+      modelId: 'anthropic.claude-opus-4-6-v1',
+      outputTokenBurndownRate: 5,
+      supportedEndpoints: ['cross-region', 'global-cross-region'],
+      crossRegion: { tokenQuotaCode: 'L-7DBBE6A1', requestQuotaCode: 'L-410BCACA' },
+      globalCrossRegion: { tokenQuotaCode: 'L-4C59C1F4', requestQuotaCode: 'L-CDA5906C' }
     }),
   },
   
